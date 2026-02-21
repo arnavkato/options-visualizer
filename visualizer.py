@@ -107,7 +107,12 @@ class OptionAnalytics:
         return pnl, delta * mult, gamma * mult, theta * mult, vega * mult, rho * mult
 
 def main():
-    st.set_page_config(layout="wide")
+    st.set_page_config(
+        page_title="Options Visualizer", 
+        page_icon="σ", 
+        layout="wide"
+    )
+
     st.title("Options Strategy PnL & Greeks Visualizer")
 
     # Initialize Dynamic Legs in Session State
