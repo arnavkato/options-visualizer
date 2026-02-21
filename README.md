@@ -2,7 +2,7 @@
 
 [![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://options-visualizer.streamlit.app/)
 
-An advanced, interactive web application built with **Streamlit** and **Plotly** that allows traders and quantitative analysts to visualize complex multi-leg options strategies. 
+An advanced, interactive web application built with **Streamlit** and **Plotly** that allows traders to visualize complex multi-leg options strategies. 
 
 **Live Demo:** [options-visualizer.streamlit.app](https://options-visualizer.streamlit.app/)
 
