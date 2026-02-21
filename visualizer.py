@@ -7,7 +7,7 @@ import pandas as pd
 
 def black_scholes_with_greeks(S, K, T, r, sigma, right="C"):
     S = np.asarray(S)
-    if T <= 0:
+    if T <= 1e-5:
         price = np.maximum(S - K, 0) if right == "C" else np.maximum(K - S, 0)
         return price, np.zeros_like(S), np.zeros_like(S), np.zeros_like(S), np.zeros_like(S), np.zeros_like(S)
         
@@ -36,7 +36,7 @@ def black_scholes_with_greeks(S, K, T, r, sigma, right="C"):
 
 def monte_carlo(S, K, T, r, sigma, option_type="call", num_simulations=10000):
     S = np.asarray(S)
-    if T <= 0:
+    if T <= 1e-5:
         price = np.maximum(S - K, 0) if option_type == "call" else np.maximum(K - S, 0)
         return price, np.zeros_like(S), np.zeros_like(S), np.zeros_like(S), np.zeros_like(S), np.zeros_like(S)
 
@@ -52,7 +52,7 @@ def monte_carlo(S, K, T, r, sigma, option_type="call", num_simulations=10000):
 
 def binomial_tree(S, K, T, r, sigma, option_type="call", num_steps=100):
     S = np.asarray(S)
-    if T <= 0:
+    if T <= 1e-5:
         price = np.maximum(S - K, 0) if option_type == "call" else np.maximum(K - S, 0)
         return price, np.zeros_like(S), np.zeros_like(S), np.zeros_like(S), np.zeros_like(S), np.zeros_like(S)
 
@@ -191,43 +191,47 @@ def main():
                 total_greeks["Vega"] += v
                 total_greeks["Rho"] += r
         
-        max_loss = round(np.min(total_pnl), 2)
-        max_profit = round(np.max(total_pnl), 2)
-        breakevens = find_breakevens(price_range, total_pnl)
-        breakeven_text = " | ".join(map(str, breakevens)) if len(breakevens) else "None"
-        
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Max Loss", f"${max_loss}")
-        c2.metric("Max Profit", f"${max_profit}")
-        c3.metric("Breakevens", breakeven_text)
-        net_premium = sum(leg.num_contracts * leg.premium * 100 for leg in legs)
-        c4.metric("Net Premium", f"${round(net_premium,2)}", f"{'Credit' if net_premium>0 else 'Debit'}")
-        
-        fig = make_subplots(specs=[[{"secondary_y": True}]])
-        
-        fig.add_trace(go.Scatter(x=price_range, y=total_pnl, name='Total PnL', line=dict(color='blue', width=4)), secondary_y=False)
-        
-        colors = ['red','green','orange','purple','brown','pink']
-        for i, (leg, pnl, color) in enumerate(zip(legs, leg_pnls, colors)):
-            fig.add_trace(go.Scatter(x=price_range, y=pnl, name=f'L{i+1}: {leg.right}{leg.K}', 
-                                line=dict(color=color, dash='dash'), visible='legendonly'), secondary_y=False)
-        
-        greek_colors = {"Delta": "cyan", "Gamma": "magenta", "Theta": "yellow", "Vega": "lightgreen", "Rho": "lightcoral"}
-        if global_model != "black_scholes" and show_greeks:
-            st.warning("⚠️ Greeks are only calculated analytically via Black-Scholes.")
+        # Check for NaN to avoid empty plot
+        if np.isnan(total_pnl).any():
+             st.error("Calculation Error: PnL contains NaN values. Check inputs (IV cannot be 0).")
         else:
-            for greek in show_greeks:
-                fig.add_trace(go.Scatter(x=price_range, y=total_greeks[greek], name=f'Total {greek}', 
-                                    line=dict(color=greek_colors[greek], width=2)), secondary_y=True)
+            max_loss = round(np.min(total_pnl), 2)
+            max_profit = round(np.max(total_pnl), 2)
+            breakevens = find_breakevens(price_range, total_pnl)
+            breakeven_text = " | ".join(map(str, breakevens)) if len(breakevens) else "None"
+            
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Max Loss", f"${max_loss}")
+            c2.metric("Max Profit", f"${max_profit}")
+            c3.metric("Breakevens", breakeven_text)
+            net_premium = sum(leg.num_contracts * leg.premium * 100 for leg in legs)
+            c4.metric("Net Premium", f"${round(net_premium,2)}", f"{'Credit' if net_premium>0 else 'Debit'}")
+            
+            fig = make_subplots(specs=[[{"secondary_y": True}]])
+            
+            fig.add_trace(go.Scatter(x=price_range, y=total_pnl, name='Total PnL', line=dict(color='blue', width=4)), secondary_y=False)
+            
+            colors = ['red','green','orange','purple','brown','pink']
+            for i, (leg, pnl, color) in enumerate(zip(legs, leg_pnls, colors)):
+                fig.add_trace(go.Scatter(x=price_range, y=pnl, name=f'L{i+1}: {leg.right}{leg.K}', 
+                                    line=dict(color=color, dash='dash'), visible='legendonly'), secondary_y=False)
+            
+            greek_colors = {"Delta": "cyan", "Gamma": "magenta", "Theta": "yellow", "Vega": "lightgreen", "Rho": "lightcoral"}
+            if global_model != "black_scholes" and show_greeks:
+                st.warning("⚠️ Greeks are only calculated analytically via Black-Scholes.")
+            else:
+                for greek in show_greeks:
+                    fig.add_trace(go.Scatter(x=price_range, y=total_greeks[greek], name=f'Total {greek}', 
+                                        line=dict(color=greek_colors[greek], width=2)), secondary_y=True)
 
-        fig.add_hline(y=0, line_dash="dash", line_color="black")
-        fig.add_vline(x=underlying, line_dash="dot", line_color="gray", annotation_text=f"Spot ${underlying}")
-        
-        fig.update_layout(title=f"PnL & Greeks @ {eval_days}d", hovermode='x unified', template="plotly_dark", height=600)
-        fig.update_yaxes(title_text="PnL ($)", secondary_y=False)
-        fig.update_yaxes(title_text="Greeks Value", secondary_y=True, showgrid=False)
-        
-        st.plotly_chart(fig, use_container_width=True)
+            fig.add_hline(y=0, line_dash="dash", line_color="black")
+            fig.add_vline(x=underlying, line_dash="dot", line_color="gray", annotation_text=f"Spot ${underlying}")
+            
+            fig.update_layout(title=f"PnL & Greeks @ {eval_days}d", hovermode='x unified', template="plotly_dark", height=600)
+            fig.update_yaxes(title_text="PnL ($)", secondary_y=False)
+            fig.update_yaxes(title_text="Greeks Value", secondary_y=True, showgrid=False)
+            
+            st.plotly_chart(fig, use_container_width=True)
 
     else:
         st.warning("Add at least one leg!")
