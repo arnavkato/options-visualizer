@@ -6,18 +6,23 @@ from scipy.stats import norm
 import pandas as pd
 
 def black_scholes_with_greeks(S, K, T, r, sigma, right="C"):
+    """Calculates Option Price and Greeks (Delta, Gamma, Theta, Vega, Rho)."""
     S = np.asarray(S)
-    if T <= 1e-5:
+    
+    # Handle expiration exact moment
+    if T <= 0:
         price = np.maximum(S - K, 0) if right == "C" else np.maximum(K - S, 0)
         return price, np.zeros_like(S), np.zeros_like(S), np.zeros_like(S), np.zeros_like(S), np.zeros_like(S)
         
     d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
     d2 = d1 - sigma * np.sqrt(T)
+    
     pdf_d1 = norm.pdf(d1)
     cdf_d1 = norm.cdf(d1)
     cdf_d2 = norm.cdf(d2)
+    
     gamma = pdf_d1 / (S * sigma * np.sqrt(T))
-    vega = (S * pdf_d1 * np.sqrt(T)) / 100
+    vega = (S * pdf_d1 * np.sqrt(T)) / 100  # Per 1% change in IV
     
     if right == "C":
         price = S * cdf_d1 - K * np.exp(-r * T) * cdf_d2
@@ -35,14 +40,10 @@ def black_scholes_with_greeks(S, K, T, r, sigma, right="C"):
     return price, delta, gamma, theta, vega, rho
 
 def monte_carlo(S, K, T, r, sigma, option_type="call", num_simulations=10000):
-    S = np.asarray(S)
-    if T <= 1e-5:
-        price = np.maximum(S - K, 0) if option_type == "call" else np.maximum(K - S, 0)
-        return price, np.zeros_like(S), np.zeros_like(S), np.zeros_like(S), np.zeros_like(S), np.zeros_like(S)
-
     np.random.seed(0)
     dt = max(T / 252, 1e-5)
     steps = max(int(T / dt), 1)
+    S = np.asarray(S)
     random_normals = np.random.normal(size=(num_simulations, steps))
     multipliers = np.exp((r - 0.5 * sigma ** 2) * dt + sigma * np.sqrt(dt) * random_normals)
     final_prices = S[:, np.newaxis] * np.prod(multipliers, axis=1)
@@ -51,16 +52,12 @@ def monte_carlo(S, K, T, r, sigma, option_type="call", num_simulations=10000):
     return price, np.zeros_like(S), np.zeros_like(S), np.zeros_like(S), np.zeros_like(S), np.zeros_like(S)
 
 def binomial_tree(S, K, T, r, sigma, option_type="call", num_steps=100):
-    S = np.asarray(S)
-    if T <= 1e-5:
-        price = np.maximum(S - K, 0) if option_type == "call" else np.maximum(K - S, 0)
-        return price, np.zeros_like(S), np.zeros_like(S), np.zeros_like(S), np.zeros_like(S), np.zeros_like(S)
-
     dt = T / num_steps
     u = np.exp(sigma * np.sqrt(dt))
     d = 1 / u
     p = (np.exp(r * dt) - d) / (u - d)
     discount = np.exp(-r * dt)
+    S = np.asarray(S)
     j_indices = np.arange(num_steps + 1)
     multipliers = (u ** (num_steps - j_indices)) * (d ** j_indices)
     stock_prices_T = S[:, np.newaxis] * multipliers
@@ -105,12 +102,15 @@ class OptionAnalytics:
         
         mult = 100 * self.num_contracts
         pnl = mult * (price - self.premium)
+        
+        # Scale Greeks by position size (x100 multiplier)
         return pnl, delta * mult, gamma * mult, theta * mult, vega * mult, rho * mult
 
 def main():
     st.set_page_config(layout="wide")
     st.title("Options Strategy PnL & Greeks Visualizer")
 
+    # Initialize Dynamic Legs in Session State
     if 'legs_data' not in st.session_state:
         st.session_state.legs_data = [
             {"id": 0, "right": "C", "K": 690.0, "sigma_pct": 10.0, "T_days": 3, "premium": 2.0, "contracts": -1},
@@ -128,6 +128,8 @@ def main():
     def remove_leg(leg_id):
         st.session_state.legs_data = [leg for leg in st.session_state.legs_data if leg["id"] != leg_id]
 
+
+    # Global Settings
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         underlying = st.number_input("Spot Price", value=689.32)
@@ -149,6 +151,7 @@ def main():
     price_max = st.number_input("Price Max", value=730.0)
     price_range = np.linspace(price_min, price_max, 500)
 
+    # Dynamic Strategy Legs UI
     st.subheader("Strategy Legs")
     st.button("✚ Add Leg", on_click=add_leg)
 
@@ -169,14 +172,17 @@ def main():
                 st.write("")
                 st.button("✕", key=f"del_{leg_id}", on_click=remove_leg, args=(leg_id,))
             
+            # Build the Option object
             T = leg_data["T_days"] / 365.0
             sigma = leg_data["sigma_pct"] / 100.0
             legs.append(OptionAnalytics(underlying, leg_data["K"], T, RISK_FREE_RATE, sigma, leg_data["right"], leg_data["premium"], leg_data["contracts"]))
+
 
     if legs:
         st.subheader("Visualization")
         
         with st.spinner("Computing..."):
+            # Arrays to hold total sums
             total_pnl = np.zeros_like(price_range)
             total_greeks = {g: np.zeros_like(price_range) for g in ["Delta", "Gamma", "Theta", "Vega", "Rho"]}
             leg_pnls = []
@@ -191,47 +197,47 @@ def main():
                 total_greeks["Vega"] += v
                 total_greeks["Rho"] += r
         
-        # Check for NaN to avoid empty plot
-        if np.isnan(total_pnl).any():
-             st.error("Calculation Error: PnL contains NaN values. Check inputs (IV cannot be 0).")
+        max_loss = round(np.min(total_pnl), 2)
+        max_profit = round(np.max(total_pnl), 2)
+        breakevens = find_breakevens(price_range, total_pnl)
+        breakeven_text = " | ".join(map(str, breakevens)) if len(breakevens) else "None"
+        
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Max Loss", f"${max_loss}")
+        c2.metric("Max Profit", f"${max_profit}")
+        c3.metric("Breakevens", breakeven_text)
+        net_premium = sum(leg.num_contracts * leg.premium * 100 for leg in legs)
+        c4.metric("Net Premium", f"${round(net_premium,2)}", f"{'Credit' if net_premium>0 else 'Debit'}")
+        
+        # Plotly Chart with Secondary Y-Axis
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+        
+        # Add Total PnL (Primary Axis)
+        fig.add_trace(go.Scatter(x=price_range, y=total_pnl, name='Total PnL', line=dict(color='blue', width=4)), secondary_y=False)
+        
+        # Add Individual Leg PnL (Primary Axis, hidden by default)
+        colors = ['red','green','orange','purple','brown','pink']
+        for i, (leg, pnl, color) in enumerate(zip(legs, leg_pnls, colors)):
+            fig.add_trace(go.Scatter(x=price_range, y=pnl, name=f'L{i+1}: {leg.right}{leg.K}', 
+                                line=dict(color=color, dash='dash'), visible='legendonly'), secondary_y=False)
+        
+        # Add Greeks (Secondary Axis)
+        greek_colors = {"Delta": "cyan", "Gamma": "magenta", "Theta": "yellow", "Vega": "lightgreen", "Rho": "lightcoral"}
+        if global_model != "black_scholes" and show_greeks:
+            st.warning("⚠️ Greeks are only calculated analytically via Black-Scholes.")
         else:
-            max_loss = round(np.min(total_pnl), 2)
-            max_profit = round(np.max(total_pnl), 2)
-            breakevens = find_breakevens(price_range, total_pnl)
-            breakeven_text = " | ".join(map(str, breakevens)) if len(breakevens) else "None"
-            
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Max Loss", f"${max_loss}")
-            c2.metric("Max Profit", f"${max_profit}")
-            c3.metric("Breakevens", breakeven_text)
-            net_premium = sum(leg.num_contracts * leg.premium * 100 for leg in legs)
-            c4.metric("Net Premium", f"${round(net_premium,2)}", f"{'Credit' if net_premium>0 else 'Debit'}")
-            
-            fig = make_subplots(specs=[[{"secondary_y": True}]])
-            
-            fig.add_trace(go.Scatter(x=price_range, y=total_pnl, name='Total PnL', line=dict(color='blue', width=4)), secondary_y=False)
-            
-            colors = ['red','green','orange','purple','brown','pink']
-            for i, (leg, pnl, color) in enumerate(zip(legs, leg_pnls, colors)):
-                fig.add_trace(go.Scatter(x=price_range, y=pnl, name=f'L{i+1}: {leg.right}{leg.K}', 
-                                    line=dict(color=color, dash='dash'), visible='legendonly'), secondary_y=False)
-            
-            greek_colors = {"Delta": "cyan", "Gamma": "magenta", "Theta": "yellow", "Vega": "lightgreen", "Rho": "lightcoral"}
-            if global_model != "black_scholes" and show_greeks:
-                st.warning("⚠️ Greeks are only calculated analytically via Black-Scholes.")
-            else:
-                for greek in show_greeks:
-                    fig.add_trace(go.Scatter(x=price_range, y=total_greeks[greek], name=f'Total {greek}', 
-                                        line=dict(color=greek_colors[greek], width=2)), secondary_y=True)
+            for greek in show_greeks:
+                fig.add_trace(go.Scatter(x=price_range, y=total_greeks[greek], name=f'Total {greek}', 
+                                    line=dict(color=greek_colors[greek], width=2)), secondary_y=True)
 
-            fig.add_hline(y=0, line_dash="dash", line_color="black")
-            fig.add_vline(x=underlying, line_dash="dot", line_color="gray", annotation_text=f"Spot ${underlying}")
-            
-            fig.update_layout(title=f"PnL & Greeks @ {eval_days}d", hovermode='x unified', template="plotly_dark", height=600)
-            fig.update_yaxes(title_text="PnL ($)", secondary_y=False)
-            fig.update_yaxes(title_text="Greeks Value", secondary_y=True, showgrid=False)
-            
-            st.plotly_chart(fig, use_container_width=True)
+        fig.add_hline(y=0, line_dash="dash", line_color="black")
+        fig.add_vline(x=underlying, line_dash="dot", line_color="gray", annotation_text=f"Spot ${underlying}")
+        
+        fig.update_layout(title=f"PnL & Greeks @ {eval_days}d", hovermode='x unified', template="plotly_dark", height=600)
+        fig.update_yaxes(title_text="PnL ($)", secondary_y=False)
+        fig.update_yaxes(title_text="Greeks Value", secondary_y=True, showgrid=False)
+        
+        st.plotly_chart(fig, use_container_width=True)
 
     else:
         st.warning("Add at least one leg!")
