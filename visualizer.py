@@ -209,25 +209,25 @@ def main():
         net_premium = sum(leg.num_contracts * leg.premium * 100 for leg in legs)
         c4.metric("Net Premium", f"${round(net_premium,2)}", f"{'Credit' if net_premium>0 else 'Debit'}")
         
-        # Plotly Chart with Secondary Y-Axis
+        # Ensure we are passing standard Python lists to Plotly to prevent Numpy 2.0 serialization bugs
+        x_data = price_range.tolist()
+        y_total = total_pnl.tolist()
+        
         fig = make_subplots(specs=[[{"secondary_y": True}]])
         
-        # Add Total PnL (Primary Axis)
-        fig.add_trace(go.Scatter(x=price_range, y=total_pnl, name='Total PnL', line=dict(color='blue', width=4)), secondary_y=False)
+        fig.add_trace(go.Scatter(x=x_data, y=y_total, name='Total PnL', line=dict(color='blue', width=4)), secondary_y=False)
         
-        # Add Individual Leg PnL (Primary Axis, hidden by default)
         colors = ['red','green','orange','purple','brown','pink']
         for i, (leg, pnl, color) in enumerate(zip(legs, leg_pnls, colors)):
-            fig.add_trace(go.Scatter(x=price_range, y=pnl, name=f'L{i+1}: {leg.right}{leg.K}', 
+            fig.add_trace(go.Scatter(x=x_data, y=pnl.tolist(), name=f'L{i+1}: {leg.right}{leg.K}', 
                                 line=dict(color=color, dash='dash'), visible='legendonly'), secondary_y=False)
         
-        # Add Greeks (Secondary Axis)
         greek_colors = {"Delta": "cyan", "Gamma": "magenta", "Theta": "yellow", "Vega": "lightgreen", "Rho": "lightcoral"}
         if global_model != "black_scholes" and show_greeks:
             st.warning("⚠️ Greeks are only calculated analytically via Black-Scholes.")
         else:
             for greek in show_greeks:
-                fig.add_trace(go.Scatter(x=price_range, y=total_greeks[greek], name=f'Total {greek}', 
+                fig.add_trace(go.Scatter(x=x_data, y=total_greeks[greek].tolist(), name=f'Total {greek}', 
                                     line=dict(color=greek_colors[greek], width=2)), secondary_y=True)
 
         fig.add_hline(y=0, line_dash="dash", line_color="black")
@@ -238,6 +238,7 @@ def main():
         fig.update_yaxes(title_text="Greeks Value", secondary_y=True, showgrid=False)
         
         st.plotly_chart(fig, use_container_width=True)
+
 
     else:
         st.warning("Add at least one leg!")
